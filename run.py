@@ -5,17 +5,15 @@ import sys
 import uvicorn
 
 from app.core import setup_logging, get_logger
-from app.main import app
 
 logger = get_logger("main")
-
-
 def run_fastapi():
     """Run FastAPI server."""
+    from app.main import app
     setup_logging()
     logger.info("Starting FastAPI server...")
     uvicorn.run(
-        "app.main:app",
+        app,
         host="0.0.0.0",
         port=8000,
         reload=True,
@@ -25,14 +23,32 @@ def run_fastapi():
 
 def run_mcp():
     """Run MCP server."""
-    setup_logging()
-    logger.info("Starting MCP server...")
-    from app.mcp import mcp_server
-    asyncio.run(mcp_server.start())
+    # Redirect stdout to stderr for startup to prevent breaking MCP protocol
+    import sys
+    import os
+    
+    # Save original stdout
+    original_stdout = sys.stdout
+    sys.stdout = sys.stderr
+    
+    try:
+        setup_logging()
+        logger.info("Starting MCP server...")
+        from app.mcp import mcp_server
+        
+        # Restore stdout before starting the server as the SDK will use it
+        sys.stdout = original_stdout
+        
+        asyncio.run(mcp_server.start())
+    except Exception as e:
+        sys.stdout = original_stdout
+        logger.error(f"Failed to start MCP server: {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] == "mcp":
+    # Check for 'mcp' in any argument to be more flexible (handles mcp, mcp@x, etc.)
+    if any("mcp" in arg.lower() for arg in sys.argv):
         run_mcp()
     else:
         run_fastapi()

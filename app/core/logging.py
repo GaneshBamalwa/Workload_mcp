@@ -45,13 +45,13 @@ def setup_logging() -> None:
     # Configure standard logging
     logging.basicConfig(
         format="%(message)s",
-        stream=sys.stdout,
+        stream=sys.stderr,
         level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
     )
 
-    # Setup JSON logging for stdout (production-ready)
+    # Setup JSON logging for stderr (production-ready)
     if settings.is_production or settings.LOG_LEVEL == "DEBUG":
-        json_handler = logging.StreamHandler(sys.stdout)
+        json_handler = logging.StreamHandler(sys.stderr)
         json_handler.setFormatter(JSONFormatter())
         logging.getLogger().addHandler(json_handler)
 

@@ -93,11 +93,27 @@ class Settings(BaseSettings):
     SLACK_BOT_TOKEN: str = Field(default="")
 
     # ============================================================
-    # JIRA OAUTH
+    # JIRA OAUTH (for future web OAuth flow)
     # ============================================================
     JIRA_CLIENT_ID: str = Field(default="")
     JIRA_CLIENT_SECRET: str = Field(default="")
     JIRA_REDIRECT_URI: str = Field(default="http://localhost:8000/api/v1/auth/jira/callback")
+
+    # ============================================================
+    # JIRA API TOKEN (for direct MCP usage – preferred)
+    # Get token from: https://id.atlassian.com/manage-profile/security/api-tokens
+    # ============================================================
+    JIRA_URL: str = Field(default="")          # e.g. https://yourcompany.atlassian.net
+    JIRA_EMAIL: str = Field(default="")        # e.g. dev@yourcompany.com
+    JIRA_API_TOKEN: str = Field(default="")    # The API token (not OAuth secret)
+
+    # ============================================================
+    # GOOGLE – direct access token for MCP mode (no web OAuth)
+    # Run scripts/get_google_token.py to generate these.
+    # ============================================================
+    GOOGLE_ACCESS_TOKEN: str = Field(default="")
+    GOOGLE_REFRESH_TOKEN: str = Field(default="")
+
 
     # ============================================================
     # LLM PROVIDERS

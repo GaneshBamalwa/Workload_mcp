@@ -123,7 +123,7 @@ class UnifiedWorkItem:
         self.metadata = metadata or {}
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary."""
+        """Convert to JSON-safe dictionary."""
         return {
             "source": self.source,
             "source_id": self.source_id,
@@ -132,7 +132,8 @@ class UnifiedWorkItem:
             "urgency": self.urgency,
             "importance": self.importance,
             "estimated_effort_minutes": self.estimated_effort_minutes,
-            "due_date": self.due_date,
+            # FIX: serialize datetime to ISO string so JSON.dumps() doesn't crash
+            "due_date": self.due_date.isoformat() if isinstance(self.due_date, datetime) else self.due_date,
             "created_by": self.created_by,
             "stakeholders": self.stakeholders,
             "dependencies": self.dependencies,

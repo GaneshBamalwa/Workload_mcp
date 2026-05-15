@@ -1,4 +1,18 @@
-"""Jira connector for issue ingestion."""
+"""Jira connector for issue ingestion.
+
+NOTE: atlassian-python-api is fully synchronous. All API calls are wrapped
+in asyncio.to_thread() so they don't block the MCP event loop.
+
+Authentication:
+  Jira Cloud  → basic auth with user email + API token
+  Jira Server → basic auth with username + password
+
+Required env vars:
+  JIRA_URL        e.g. https://yourcompany.atlassian.net
+  JIRA_EMAIL      e.g. dev@yourcompany.com
+  JIRA_API_TOKEN  API token from https://id.atlassian.com/manage-profile/security/api-tokens
+"""
+import asyncio
 from datetime import datetime
 from typing import Any, Optional
 
@@ -9,7 +23,7 @@ from app.connectors.base import BaseConnector, UnifiedWorkItem
 
 logger = structlog.get_logger(__name__)
 
-# Jira priority to urgency mapping
+# Jira priority → urgency score
 PRIORITY_TO_URGENCY = {
     "Blocker": 1.0,
     "Critical": 0.95,
@@ -25,27 +39,30 @@ class JiraConnector(BaseConnector):
     """Jira connector for issue ingestion."""
 
     connector_type = "jira"
-    scope_required = []  # OAuth scopes handled by atlassian-python-api
+    scope_required = []
 
-    def __init__(self, url: str, user: str, api_token: str):
-        """Initialize Jira connector."""
-        # Store separately from base class access_token
+    def __init__(self, url: str, user_email: str, api_token: str):
+        """Initialize Jira connector.
+
+        Args:
+            url:       Jira base URL, e.g. https://yourcompany.atlassian.net
+            user_email: Email address of the Jira user
+            api_token: API token (NOT OAuth client secret)
+        """
+        # BaseConnector expects (access_token, user_id)
+        super().__init__(access_token=api_token, user_id=user_email)
         self.url = url
-        self.user = user
+        self.user_email = user_email
         self.api_token = api_token
-        self.access_token = api_token  # For compatibility
-        self.user_id = user  # Set user_id to email
-        self.client = Jira(url=url, username=user, password=api_token)
-        logger.debug("Jira connector initialized", url=url)
+        # Jira() is sync – we call its methods via asyncio.to_thread()
+        self.client = Jira(url=url, username=user_email, password=api_token, cloud=True)
+        logger.debug("Jira connector initialized", url=url, user=user_email)
 
     async def test_connection(self) -> bool:
         """Test Jira connection."""
         try:
-            server_info = self.client.get_server_info()
-            logger.info(
-                "Jira connection test successful",
-                server_url=server_info.get("baseUrl"),
-            )
+            info = await asyncio.to_thread(self.client.get_server_info)
+            logger.info("Jira connection test successful", server=info.get("baseUrl"))
             return True
         except Exception as e:
             logger.error("Jira connection test failed", error=str(e))
@@ -56,33 +73,33 @@ class JiraConnector(BaseConnector):
         sync_cursor: Optional[str] = None,
         limit: int = 50,
     ) -> tuple[list[dict[str, Any]], Optional[str]]:
-        """Get issues from Jira."""
+        """Get open Jira issues assigned to the current user."""
         try:
-            # Build JQL query
             jql_parts = [
-                'assignee = currentUser()',  # Issues assigned to user
-                'status NOT IN (Done, Closed, Resolved)',  # Open issues
+                f'assignee = "{self.user_email}"',
+                'statusCategory != Done',
             ]
-
             if sync_cursor:
-                # Cursor format: "timestamp:offset"
                 jql_parts.append(f'updated >= "{sync_cursor}"')
 
-            jql = " AND ".join(jql_parts)
+            jql = " AND ".join(jql_parts) + " ORDER BY updated DESC"
 
-            # Get issues
-            issues_response = self.client.jql(
+            response = await asyncio.to_thread(
+                self.client.jql,
                 jql,
                 limit=min(limit, 100),
+                fields=[
+                    "summary", "description", "status", "priority",
+                    "assignee", "duedate", "created", "updated",
+                    "issuetype", "project", "labels",
+                ],
             )
 
-            issues = issues_response.get("issues", [])
+            issues: list[dict] = response.get("issues", [])
             next_cursor = None
-
-            # Create cursor for next sync
             if issues:
-                last_issue = issues[-1]
-                next_cursor = last_issue.get("fields", {}).get("updated")
+                # Use the last updated date as the next incremental cursor
+                next_cursor = issues[-1].get("fields", {}).get("updated")
 
             logger.info("Fetched issues from Jira", count=len(issues))
             return issues, next_cursor
@@ -93,79 +110,80 @@ class JiraConnector(BaseConnector):
 
     async def normalize_item(self, item: dict[str, Any]) -> dict[str, Any]:
         """Normalize Jira issue to unified work item."""
-        try:
-            fields = item.get("fields", {})
-            key = item.get("key", "")
-            summary = fields.get("summary", "")
-            description = fields.get("description", "")
-            assignee = fields.get("assignee", {})
-            priority = fields.get("priority", {})
-            due_date_str = fields.get("duedate")
-            created_str = fields.get("created")
-            status = fields.get("status", {})
+        fields = item.get("fields", {})
+        key = item.get("key", "")
+        summary = fields.get("summary", "")
+        description = fields.get("description") or ""
+        if isinstance(description, dict):
+            # Jira Cloud returns description as Atlassian Document Format (ADF)
+            description = _extract_adf_text(description)
 
-            # Parse dates
-            due_date = None
-            if due_date_str:
-                try:
-                    due_date = datetime.fromisoformat(due_date_str.replace("Z", "+00:00"))
-                except (ValueError, AttributeError):
-                    pass
+        priority = fields.get("priority") or {}
+        priority_name = priority.get("name", "Medium")
+        urgency = PRIORITY_TO_URGENCY.get(priority_name, 0.5)
 
-            created_date = None
-            if created_str:
-                try:
-                    created_date = datetime.fromisoformat(created_str.replace("Z", "+00:00"))
-                except (ValueError, AttributeError):
-                    pass
+        due_date = None
+        if fields.get("duedate"):
+            try:
+                due_date = datetime.fromisoformat(fields["duedate"])
+            except (ValueError, TypeError):
+                pass
 
-            # Extract urgency from priority
-            priority_name = priority.get("name", "Medium")
-            urgency = PRIORITY_TO_URGENCY.get(priority_name, 0.5)
+        status = fields.get("status") or {}
+        status_name = status.get("name", "")
+        requires_response = status_name.lower() not in ["done", "closed", "resolved", "cancelled"]
 
-            # Determine if requires response (open issues assigned to user)
-            requires_response = status.get("name", "").lower() not in ["done", "closed", "resolved"]
+        assignee = fields.get("assignee") or {}
+        project = fields.get("project") or {}
 
-            # Create unified work item
-            work_item = UnifiedWorkItem(
-                source="jira",
-                source_id=key,
-                title=f"[{key}] {summary}",
-                description=description,
-                urgency=urgency,
-                importance=0.8,  # Jira tickets are typically important
-                created_by=assignee.get("emailAddress") or assignee.get("name"),
-                requires_response=requires_response,
-                requires_deep_work=True,  # Jira tickets usually need focused work
-                confidence_score=0.95,
-                category="task",
-                due_date=due_date,
-                metadata={
-                    "jira_key": key,
-                    "status": status.get("name"),
-                    "priority": priority_name,
-                    "assignee": assignee.get("name"),
-                    "issue_type": fields.get("issuetype", {}).get("name"),
-                    "created": created_date.isoformat() if created_date else None,
-                    "project": fields.get("project", {}).get("key"),
-                },
-            )
+        work_item = UnifiedWorkItem(
+            source="jira",
+            source_id=key,
+            title=f"[{key}] {summary}",
+            description=description[:500] if description else None,
+            urgency=urgency,
+            importance=0.8,
+            created_by=assignee.get("emailAddress") or assignee.get("displayName"),
+            requires_response=requires_response,
+            requires_deep_work=True,
+            confidence_score=0.95,
+            category="bug" if fields.get("issuetype", {}).get("name", "").lower() == "bug" else "task",
+            due_date=due_date,
+            metadata={
+                "jira_key": key,
+                "status": status_name,
+                "priority": priority_name,
+                "project": project.get("key"),
+                "issue_type": fields.get("issuetype", {}).get("name"),
+                "labels": fields.get("labels", []),
+                "url": f"{self.url}/browse/{key}",
+            },
+        )
+        return work_item.to_dict()
 
-            return work_item.to_dict()
 
-        except Exception as e:
-            logger.error("Jira issue normalization failed", error=str(e))
-            raise
+def _extract_adf_text(node: Any, depth: int = 0) -> str:
+    """Recursively extract plain text from Atlassian Document Format (ADF) JSON."""
+    if depth > 10:
+        return ""
+    if isinstance(node, str):
+        return node
+    if isinstance(node, dict):
+        if node.get("type") == "text":
+            return node.get("text", "")
+        parts = []
+        for child in node.get("content", []):
+            parts.append(_extract_adf_text(child, depth + 1))
+        return " ".join(p for p in parts if p)
+    if isinstance(node, list):
+        return " ".join(_extract_adf_text(n, depth + 1) for n in node)
+    return ""
 
 
 class JiraConnectorFactory:
     """Factory for creating Jira connectors."""
 
     @staticmethod
-    def create_from_oauth(
-        jira_url: str,
-        user_email: str,
-        api_token: str,
-    ) -> JiraConnector:
-        """Create connector from Jira credentials."""
+    def create_from_credentials(jira_url: str, user_email: str, api_token: str) -> JiraConnector:
+        """Create connector from Jira API token credentials."""
         return JiraConnector(jira_url, user_email, api_token)

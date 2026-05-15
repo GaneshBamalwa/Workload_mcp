@@ -91,3 +91,12 @@ migrations/versions/__pycache__/
 
 # Observability
 opentelemetry-collector.log
+
+# Google OAuth secrets & tokens – NEVER commit these
+credentials.json
+_credentials_patched.json
+google_token.pickle
+
+# Root log files
+error.txt
+output.txt
