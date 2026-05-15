@@ -1,0 +1,93 @@
+# Environment
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Testing
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.hypothesis/
+*.cover
+*.py,cover
+.tox/
+.nox/
+.hypothesis/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.iml
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+local.db
+
+# Logs
+logs/
+*.log
+*.log.*
+
+# Docker
+docker-compose.override.yml
+.dockerignore
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Cache
+.cache/
+*.cache
+
+# Temp
+tmp/
+temp/
+*.tmp
+
+# LLM/AI
+.llamacache/
+.ollama/
+
+# Migrations
+migrations/versions/__pycache__/
+
+# Observability
+opentelemetry-collector.log

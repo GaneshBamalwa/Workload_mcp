@@ -1,0 +1,154 @@
+version: '3.9'
+
+services:
+  # ============================================================
+  # PostgreSQL Database
+  # ============================================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: workload-postgres
+    environment:
+      POSTGRES_USER: workload
+      POSTGRES_PASSWORD: workload_pass
+      POSTGRES_DB: workload_db
+      POSTGRES_INITDB_ARGS: -c shared_buffers=256MB -c max_connections=200
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U workload"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - workload-network
+
+  # ============================================================
+  # Redis Cache & Queue
+  # ============================================================
+  redis:
+    image: redis:7-alpine
+    container_name: workload-redis
+    command: redis-server --appendonly yes --requirepass ""
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - workload-network
+
+  # ============================================================
+  # FastAPI Application
+  # ============================================================
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: workload-api
+    environment:
+      ENV: development
+      DEBUG: "true"
+      LOG_LEVEL: DEBUG
+      DATABASE_URL: postgresql+asyncpg://workload:workload_pass@postgres:5432/workload_db
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET_KEY: dev-secret-key-change-in-production
+      ALLOWED_ORIGINS: http://localhost:3000,http://localhost:8000
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./app:/app/app
+      - ./migrations:/app/migrations
+    command: >
+      sh -c "
+        alembic upgrade head &&
+        uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      "
+    networks:
+      - workload-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ============================================================
+  # Celery Worker (Background Jobs)
+  # ============================================================
+  celery-worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: workload-celery
+    environment:
+      ENV: development
+      DEBUG: "true"
+      LOG_LEVEL: DEBUG
+      DATABASE_URL: postgresql+asyncpg://workload:workload_pass@postgres:5432/workload_db
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+    depends_on:
+      - postgres
+      - redis
+      - api
+    volumes:
+      - ./app:/app/app
+    command: celery -A app.workers.celery_app worker --loglevel=debug
+    networks:
+      - workload-network
+
+  # ============================================================
+  # Prometheus Metrics
+  # ============================================================
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: workload-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./docker/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    networks:
+      - workload-network
+
+  # ============================================================
+  # Grafana Dashboard
+  # ============================================================
+  grafana:
+    image: grafana/grafana:latest
+    container_name: workload-grafana
+    ports:
+      - "3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    networks:
+      - workload-network
+
+volumes:
+  postgres_data:
+  redis_data:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  workload-network:
+    driver: bridge

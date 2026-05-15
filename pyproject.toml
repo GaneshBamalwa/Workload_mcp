@@ -1,0 +1,165 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "workload-mcp"
+version = "0.1.0"
+description = "Production-grade Workload Management MCP Server"
+readme = "README.md"
+requires-python = ">=3.12"
+license = {text = "MIT"}
+authors = [
+    {name = "Platform Team", email = "platform@company.com"}
+]
+
+dependencies = [
+    # Core MCP & Web Framework
+    "mcp>=0.5.0",
+    "fastapi>=0.109.0",
+    "uvicorn[standard]>=0.27.0",
+    "pydantic>=2.5.0",
+    "pydantic-settings>=2.1.0",
+    
+    # Async & Concurrency
+    "asyncio-contextmanager>=1.0.0",
+    "httpx>=0.25.0",
+    
+    # Database & ORM
+    "sqlalchemy>=2.0.23",
+    "alembic>=1.13.0",
+    "psycopg[binary]>=3.1.0",
+    "asyncpg>=0.29.0",
+    
+    # Redis & Caching
+    "redis>=5.0.0",
+    "aioredis>=2.0.0",
+    
+    # Background Jobs
+    "celery>=5.3.0",
+    "dramatiq[rabbitmq,redis]>=1.14.0",
+    
+    # Integrations & OAuth
+    "google-auth>=2.25.0",
+    "google-auth-oauthlib>=1.2.0",
+    "google-auth-httplib2>=0.2.0",
+    "google-api-python-client>=2.107.0",
+    "slack-sdk>=3.26.0",
+    "atlassian-python-api>=3.41.0",
+    
+    # LLM & AI
+    "openai>=1.13.0",
+    "anthropic>=0.25.0",
+    "litellm>=1.28.0",
+    "langchain>=0.1.0",
+    "langgraph>=0.0.1",
+    
+    # Authentication & Security
+    "python-jose[cryptography]>=3.3.0",
+    "passlib[bcrypt]>=1.7.4",
+    "python-dotenv>=1.0.0",
+    "cryptography>=41.0.0",
+    
+    # Observability & Logging
+    "structlog>=23.3.0",
+    "python-json-logger>=2.0.7",
+    "opentelemetry-api>=1.21.0",
+    "opentelemetry-sdk>=1.21.0",
+    "opentelemetry-exporter-otlp>=1.21.0",
+    "opentelemetry-instrumentation-fastapi>=0.42b0",
+    "opentelemetry-instrumentation-sqlalchemy>=0.42b0",
+    "prometheus-client>=0.19.0",
+    "sentry-sdk>=1.39.0",
+    
+    # Utilities
+    "python-dateutil>=2.8.2",
+    "pytz>=2024.1",
+    "tenacity>=8.2.3",
+    "pydantic-extra-types>=2.4.1",
+    "email-validator>=2.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.3",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.1.0",
+    "pytest-mock>=3.12.0",
+    "black>=23.12.0",
+    "ruff>=0.1.13",
+    "mypy>=1.7.1",
+    "isort>=5.13.2",
+    "pre-commit>=3.6.0",
+    "faker>=22.0.0",
+]
+
+test = [
+    "pytest>=7.4.3",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.1.0",
+    "pytest-mock>=3.12.0",
+    "faker>=22.0.0",
+]
+
+[tool.hatch.envs.dev]
+features = ["dev", "test"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+python_files = "test_*.py"
+addopts = "-v --cov=app --cov-report=html --cov-report=term"
+
+[tool.black]
+line-length = 120
+target-version = ["py312"]
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | build
+  | dist
+  | migrations
+)/
+'''
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "C",    # flake8-comprehensions
+    "B",    # flake8-bugbear
+    "UP",   # pyupgrade
+    "ARG",  # flake8-unused-arguments
+    "SIM",  # flake8-simplify
+]
+ignore = [
+    "E501",  # line too long, handled by black
+    "B008",  # function call in default argument
+]
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+check_untyped_defs = true
+no_implicit_optional = true
+ignore_missing_imports = true
+exclude = ["migrations/"]
+
+[tool.isort]
+profile = "black"
+line_length = 120
+skip_gitignore = true
